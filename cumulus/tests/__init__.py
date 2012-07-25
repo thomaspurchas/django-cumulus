@@ -2,7 +2,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from cumulus.storage import CloudFilesStorage
-from cumulus.tests.models import Thing
+from cumulus.tests.models import Thing, Second
 
 
 cloudfiles_storage = CloudFilesStorage()
@@ -14,6 +14,7 @@ class CumulusTests(TestCase):
         self.document = SimpleUploadedFile('test.txt', "test content")
         self.custom = SimpleUploadedFile('custom.txt', "custom type", content_type="custom/type")
         self.thing = Thing.objects.create(image=self.image, document=self.document, custom=self.custom)
+        self.second = Second.objects.create(image=self.image, document=self.document, custom=self.custom)
 
     def test_file_api(self):
         "Make sure we can access file attributes using the Django File API."
@@ -26,24 +27,30 @@ class CumulusTests(TestCase):
         self.assertEqual(self.thing.document.size, 12)
         self.assertTrue("rackcdn.com" in self.thing.document.url,
                      "URL is not a valid Cloud Files CDN URL.")
-        delattr(self.thing.document.storage, '_container_public_uri')
+        delattr(self.thing.document.storage, '_public_uri_cache')
         self.thing.document.storage.use_ssl = True
+        print self.thing.document.url
         self.assertTrue(self.thing.document.url.startswith("https"))
 
     def test_image_content_type(self):
         "Ensure content type is set properly for the uploaded image."
-        cloud_image = cloudfiles_storage.container.get_object(self.thing.image.name)
+        cloud_image = cloudfiles_storage.default_container.get_object(self.thing.image.name)
         self.assertEqual(cloud_image.content_type, "image/jpeg")
 
     def test_text_content_type(self):
         "Ensure content type is set properly for the uploaded text."
-        cloud_doc = cloudfiles_storage.container.get_object(self.thing.document.name)
+        cloud_doc = cloudfiles_storage.default_container.get_object(self.thing.document.name)
         self.assertEqual(cloud_doc.content_type, "text/plain")
 
     def test_custom_content_type(self):
         "Ensure content type is set properly when custom content type is supplied."
-        cloud_custom = cloudfiles_storage.container.get_object(self.thing.custom.name)
+        cloud_custom = cloudfiles_storage.default_container.get_object(self.thing.custom.name)
         self.assertEqual(cloud_custom.content_type, "custom/type")
+
+    def test_second_container(self):
+        "Make sure that the second container works"
+
 
     def tearDown(self):
         self.thing.delete()
+        self.second.delete()

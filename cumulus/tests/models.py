@@ -4,10 +4,20 @@ from cumulus.storage import CloudFilesStorage
 
 cloudfiles_storage = CloudFilesStorage()
 
-class Thing(models.Model):
+class Upload(models.Model):
     "A dummy model to use for tests."
-    image = models.ImageField(storage=cloudfiles_storage, upload_to='cumulus-tests')
-    document = models.FileField(storage=cloudfiles_storage, upload_to='cumulus-tests')
-    custom = models.FileField(storage=cloudfiles_storage, upload_to='cumulus-tests')
+    def upload_to(self, name):
+        return '%s/%s' % (self.upload_to, name)
+    image = models.ImageField(storage=cloudfiles_storage, upload_to=upload_to)
+    document = models.FileField(storage=cloudfiles_storage, upload_to=upload_to)
+    custom = models.FileField(storage=cloudfiles_storage, upload_to=upload_to)
 
+    class Meta:
+        abstract = True
 
+class Thing(Upload):
+
+    upload_to = 'cumulus-tests'
+
+class Second(Upload):
+    upload_to = 'secondcontainer:cumulus-second-tests'

@@ -150,15 +150,19 @@ STATICFILES_STORAGE = 'cumulus.storage.CloudFilesStaticStorage'
 
 # these are the default cumulus settings
 CUMULUS = {
-    'API_KEY': None,
-    'AUTH_URL': 'us_authurl',
+    'API_KEY': 'd5e9e653c4e91c75e4954455fd1ba687',
+    'AUTH_URL': 'uk_authurl',
     'CNAMES': None,
-    'CONTAINER': None,
+    'CONTAINERS': {
+        'default': True,
+        'secondcontainer': True,
+    },
+    'DEFAULT_CONTAINER': 'default',
     'SERVICENET': False,
     'TIMEOUT': 5,
     'TTL': 600,
     'USE_SSL': False,
-    'USERNAME': None,
+    'USERNAME': 'thomaspurchas',
     'STATIC_CONTAINER': None,
     'FILTER_LIST': []
 }

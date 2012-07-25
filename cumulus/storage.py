@@ -1,15 +1,19 @@
 import mimetypes
 import os
+import logging
 from StringIO import StringIO
 
 import cloudfiles
-from cloudfiles.errors import NoSuchObject, ResponseError
+from cloudfiles.errors import NoSuchObject, ResponseError, NoSuchContainer
 
 from django.core.files import File
 from django.core.files.storage import Storage
 
 from .settings import CUMULUS
 
+from errors import UnknownContainer
+
+logger = logging.getLogger(__name__)
 
 class CloudFilesStorage(Storage):
     """
@@ -17,15 +21,16 @@ class CloudFilesStorage(Storage):
     """
     default_quick_listdir = True
 
-    def __init__(self, username=None, api_key=None, container=None, timeout=None,
-                 connection_kwargs=None):
+    def __init__(self, username=None, api_key=None, containers=None, default_container=None,
+                 timeout=None, connection_kwargs=None):
         """
         Initialize the settings for the connection and container.
         """
         self.api_key = api_key or CUMULUS['API_KEY']
         self.auth_url = CUMULUS['AUTH_URL']
         self.connection_kwargs = connection_kwargs or {}
-        self.container_name = container or CUMULUS['CONTAINER']
+        self.containers = containers or CUMULUS['CONTAINERS']
+        self.default_container_name = default_container or CUMULUS['DEFAULT_CONTAINER']
         self.timeout = timeout or CUMULUS['TIMEOUT']
         self.use_servicenet = CUMULUS['SERVICENET']
         self.username = username or CUMULUS['USERNAME']
@@ -59,41 +64,80 @@ class CloudFilesStorage(Storage):
 
     connection = property(_get_connection, _set_connection)
 
-    def _get_container(self):
-        if not hasattr(self, '_container'):
-            self.container = self.connection.get_container(
-                                                        self.container_name)
-        return self._container
-
-    def _set_container(self, container):
+    def get_container(self, name):
         """
-        Set the container, making it publicly available if it is not already.
+        Get a container by name. If the container does not exist create it. Also
+        caches container objects for later use. Will also make container public,
+        BUT not private.
         """
-        if not container.is_public():
-            container.make_public()
-        if hasattr(self, '_container_public_uri'):
-            delattr(self, '_container_public_uri')
-        self._container = container
+        if name not in self.containers:
+            raise UnknownContainer('Container %s not found in settings' % name)
 
-    container = property(_get_container, _set_container)
+        if not hasattr(self, '_container_cache'):
+            self._container_cache = {}
+        container = self._container_cache.get(name, None)
+        if not container:
+            try:
+                container = self.connection.get_container(name)
+            except NoSuchContainer:
+                container = self.connection.create_container(name)
+            if self.containers[name] == True:
+                if not container.is_public():
+                    logger.info('Makeing %s public' % name)
+                    container.make_public()
+            self._container_cache[name] = container
 
-    def _get_container_url(self):
-        if not hasattr(self, '_container_public_uri'):
+        return container
+
+    def get_container_from_path(self, path, return_new_path=False):
+        """Spilits apart the path to work out what container to return"""
+        parts = path.split(':')
+        if len(parts) > 1:
+            container = self.get_container(parts[0])
+            path = ":".join(parts[1:])
+        else:
+            container = self.default_container
+        if return_new_path:
+            return container, path
+        else:
+            return container
+
+    def _get_default_container(self):
+        if not hasattr(self, '_default_container'):
+            self._default_container = self.get_container(self.default_container_name)
+        return self._default_container
+
+    def _set_default_container(self, container):
+        """
+        Set the container, making it publicly available if it is not already,
+        and has been set to public.
+        """
+        self._default_container = container
+
+    default_container = property(_get_default_container, _set_default_container)
+
+    def get_container_url(self, name):
+        container = self.get_container_from_path(name)
+        if not hasattr(self, '_public_uri_cache'):
+            self._public_uri_cache = {}
+        uri = self._public_uri_cache.get(container.name)
+        if not uri:
             if self.use_ssl:
-                self._container_public_uri = self.container.public_ssl_uri()
+                uri = container.public_ssl_uri()
             else:
-                self._container_public_uri = self.container.public_uri()
-        if CUMULUS['CNAMES'] and self._container_public_uri in CUMULUS['CNAMES']:
-            self._container_public_uri = CUMULUS['CNAMES'][self._container_public_uri]
-        return self._container_public_uri
-
-    container_url = property(_get_container_url)
+                uri = container.public_uri()
+            self._public_uri_cache[container.name] = uri
+        if CUMULUS['CNAMES'] and uri in CUMULUS['CNAMES']:
+            uri = CUMULUS['CNAMES'][uri]
+            self._public_uri_cache[container.name] = uri
+        return uri
 
     def _get_cloud_obj(self, name):
         """
         Helper function to get retrieve the requested Cloud Files Object.
         """
-        return self.container.get_object(name)
+        container, name = self.get_container_from_path(name, True)
+        return container.get_object(name)
 
     def _open(self, name, mode='rb'):
         """
@@ -101,20 +145,22 @@ class CloudFilesStorage(Storage):
         """
         return CloudFilesStorageFile(storage=self, name=name)
 
-    def _save(self, name, content):
+    def _save(self, name, content, container=None):
         """
         Use the Cloud Files service to write ``content`` to a remote file
         (called ``name``).
         """
+        if not container:
+            container, name = self.get_container_from_path(name, True)
         (path, last) = os.path.split(name)
         if path:
             try:
-                self.container.get_object(path)
+                container.get_object(path)
             except NoSuchObject:
-                self._save(path, CloudStorageDirectory(path))
+                self._save(path, CloudStorageDirectory(path), container)
 
         content.open()
-        cloud_obj = self.container.create_object(name)
+        cloud_obj = container.create_object(name)
         if hasattr(content.file, 'size'):
             cloud_obj.size = content.file.size
         else:
@@ -136,8 +182,9 @@ class CloudFilesStorage(Storage):
         """
         Deletes the specified file from the storage system.
         """
+        container, name = self.get_container_from_path(name, True)
         try:
-            self.container.delete_object(name)
+            container.delete_object(name)
         except ResponseError, exc:
             if exc.status == 404:
                 pass
@@ -163,11 +210,12 @@ class CloudFilesStorage(Storage):
 
         If the list of directories is required, use the full_listdir method.
         """
+        container, name = self.get_container_from_path(path, True)
         files = []
         if path and not path.endswith('/'):
             path = '%s/' % path
         path_len = len(path)
-        for name in self.container.list_objects(path=path):
+        for name in container.list_objects(path=path):
             files.append(name[path_len:])
         return ([], files)
 
@@ -180,12 +228,13 @@ class CloudFilesStorage(Storage):
         because every single object must be returned (cloudfiles does not
         provide an explicit way of listing directories).
         """
+        container, name = self.get_container_from_path(path, True)
         dirs = set()
         files = []
         if path and not path.endswith('/'):
             path = '%s/' % path
         path_len = len(path)
-        for name in self.container.list_objects(prefix=path):
+        for name in container.list_objects(prefix=path):
             name = name[path_len:]
             slash = name[1:-1].find('/') + 1
             if slash:
@@ -207,7 +256,7 @@ class CloudFilesStorage(Storage):
         Returns an absolute URL where the file's contents can be accessed
         directly by a web browser.
         """
-        return '%s/%s' % (self.container_url, name)
+        return '%s/%s' % (self.get_container_url(name), name)
 
 
 class CloudStorageDirectory(File):
@@ -337,11 +386,29 @@ class ThreadSafeCloudFilesStorage(CloudFilesStorage):
 
     connection = property(_get_connection, CloudFilesStorage._set_connection)
 
-    def _get_container(self):
+    def get_container(self, name):
+        if name not in self.containers:
+            raise UnknownContainer('Container %s not found in settings' % name)
+        if not hasattr(self.local_cache, '_container_cache'):
+            self.local_cache._container_cache = {}
+        container = self.local_cache._container_cache.get(name)
+        if not container:
+            try:
+                container = self.connection.get_container(name)
+            except NoSuchContainer:
+                container = self.connection.create_container(name)
+            if self.containers[name] == True:
+                if not container.is_public():
+                    container.make_public()
+            self.local_cache._container_cache[name] = container
+
+        return container
+
+    def _get_default_container(self):
         if not hasattr(self.local_cache, 'container'):
             container = self.connection.get_container(self.container_name)
-            self.local_cache.container = container
+            self.local_cache.default_container = container
 
-        return self.local_cache.container
+        return self.local_cache.default_container
 
-    container = property(_get_container, CloudFilesStorage._set_container)
+    container = property(_get_default_container, CloudFilesStorage._set_default_container)
