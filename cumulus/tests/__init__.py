@@ -29,8 +29,6 @@ class CumulusTests(TestCase):
                      "URL is not a valid Cloud Files CDN URL.")
         delattr(self.thing.document.storage, '_public_uri_cache')
         self.thing.document.storage.use_ssl = True
-        print self.thing.document.url
-        print self.second.document.name
         self.assertTrue(self.thing.document.url.startswith("https"))
 
     def test_image_content_type(self):
