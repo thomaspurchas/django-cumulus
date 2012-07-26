@@ -6,7 +6,8 @@ CUMULUS = {
     'API_KEY': None,
     'AUTH_URL': 'us_authurl',
     'CNAMES': None,
-    'CONTAINER': None,
+    'CONTAINERS': {},
+    'DEFAULT_CONTAINER': None,
     'SERVICENET': False,
     'TIMEOUT': 5,
     'TTL': 600,
@@ -39,3 +40,20 @@ if not hasattr(settings, 'CUMULUS'):
         'TTL': getattr(settings, 'CUMULUS_TTL', 600),
         'USERNAME': getattr(settings, 'CUMULUS_USERNAME'),
     })
+
+if CUMULUS.get('CONTAINER') and not CUMULUS.get('CONTAINERS'):
+    import warnings
+    warnings.warn(
+        ("settings.CUMULUS['CONTAINER'] is deprecated;" +
+         "use settings.CUMULUS['CONTAINERS'] and" +
+         "settings.CUMULUS['DEFAULT_CONTAINER'] instead."),
+         PendingDeprecationWarning
+    )
+    CUMULUS.update({
+        'CONTAINERS': {
+            CUMULUS['CONTAINER']: True
+        },
+        'DEFAULT_CONTAINER': CUMULUS['CONTAINER']
+    })
+
+    del CUMULUS['CONTAINER']
