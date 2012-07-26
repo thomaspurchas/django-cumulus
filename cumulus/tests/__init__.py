@@ -30,26 +30,37 @@ class CumulusTests(TestCase):
         delattr(self.thing.document.storage, '_public_uri_cache')
         self.thing.document.storage.use_ssl = True
         print self.thing.document.url
+        print self.second.document.name
         self.assertTrue(self.thing.document.url.startswith("https"))
 
     def test_image_content_type(self):
         "Ensure content type is set properly for the uploaded image."
-        cloud_image = cloudfiles_storage.default_container.get_object(self.thing.image.name)
+        name = self.thing.image.name.split(':')[1]
+        cloud_image = cloudfiles_storage.default_container.get_object(name)
         self.assertEqual(cloud_image.content_type, "image/jpeg")
 
     def test_text_content_type(self):
         "Ensure content type is set properly for the uploaded text."
-        cloud_doc = cloudfiles_storage.default_container.get_object(self.thing.document.name)
+        name = self.thing.document.name.split(':')[1]
+        cloud_doc = cloudfiles_storage.default_container.get_object(name)
         self.assertEqual(cloud_doc.content_type, "text/plain")
 
     def test_custom_content_type(self):
         "Ensure content type is set properly when custom content type is supplied."
-        cloud_custom = cloudfiles_storage.default_container.get_object(self.thing.custom.name)
+        name = self.thing.custom.name.split(':')[1]
+        cloud_custom = cloudfiles_storage.default_container.get_object(name)
         self.assertEqual(cloud_custom.content_type, "custom/type")
 
     def test_second_container(self):
-        "Make sure that the second container works"
-
+        """
+        Make sure that the second container works, that that returned urls for each container
+        is different.
+        """
+        url_one = self.thing.document.url
+        url_two = self.second.document.url
+        url_one = url_one.split('.')[0]
+        url_two = url_two.split('.')[0]
+        self.assertNotEqual(url_one, url_two)
 
     def tearDown(self):
         self.thing.delete()
