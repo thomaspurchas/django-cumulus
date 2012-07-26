@@ -117,7 +117,6 @@ class CloudFilesStorage(Storage):
     default_container = property(_get_default_container, _set_default_container)
 
     def get_container_url(self, name):
-        print name
         container = self.get_container_from_path(name)
         if not hasattr(self, '_public_uri_cache'):
             self._public_uri_cache = {}
