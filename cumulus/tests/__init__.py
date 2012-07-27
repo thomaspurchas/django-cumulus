@@ -59,6 +59,14 @@ class CumulusTests(TestCase):
         url_one = url_one.split('.')[0]
         url_two = url_two.split('.')[0]
         self.assertNotEqual(url_one, url_two)
+    
+    def test_root_directory_creation(self):
+        """
+        Make sure that trying to create a directory with the path `/` doesn't happen
+        """
+        image = SimpleUploadedFile('/1x1.jpg', 'd')
+        
+        Thing.objects.create(image=image, document=image, custom=image)
 
     def tearDown(self):
         self.thing.delete()
